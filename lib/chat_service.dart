@@ -39,10 +39,34 @@ class ChatService extends ChangeNotifier {
     _boxDm = await Hive.openBox<Message>('chat_history_dm');
     _boxGroup = await Hive.openBox<Message>('chat_history_group');
     
+    // --- DATABASE SANITIZATION ---
+    // Remove corrupted messages to prevent "null is not String" crashes
+    await _sanitizeBox(_boxDm);
+    await _sanitizeBox(_boxGroup);
+    
     _loadMessagesForThread();
     
     // Start Polling for Heartbeat Messages
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) => _pollServer());
+  }
+
+  Future<void> _sanitizeBox(Box<Message>? box) async {
+    if (box == null) return;
+    final keysToDelete = <dynamic>[];
+    for (var key in box.keys) {
+      try {
+        final msg = box.get(key);
+        if (msg == null || msg.text == null) {
+          keysToDelete.add(key);
+        }
+      } catch (e) {
+        keysToDelete.add(key);
+      }
+    }
+    if (keysToDelete.isNotEmpty) {
+      print("Sanitizing: Deleting ${keysToDelete.length} corrupted messages.");
+      await box.deleteAll(keysToDelete);
+    }
   }
   
   void setCharacter(String id) {
@@ -59,13 +83,27 @@ class ChatService extends ChangeNotifier {
   
   void _loadMessagesForThread() async {
     // Small delay to allow pending Hive writes to finish
-    await Future.delayed(const Duration(milliseconds: 20));
+    await Future.delayed(const Duration(milliseconds: 50));
     final box = _currentThread == "group" ? _boxGroup : _boxDm;
-    try {
-      _messages = box?.values.toList().cast<Message>() ?? [];
-    } catch (e) {
-      print("Concurrency Error loading messages: $e");
+    
+    if (box == null || !box.isOpen) {
       _messages = [];
+      notifyListeners();
+      return;
+    }
+
+    try {
+      // Create a fixed list copy to avoid concurrent modification issues
+      _messages = box.values.toList().cast<Message>();
+    } catch (e) {
+      print("Concurrency Error loading messages, retrying: $e");
+      await Future.delayed(const Duration(milliseconds: 100));
+      try {
+         _messages = box.values.toList().cast<Message>();
+      } catch (e2) {
+         print("Retry failed: $e2");
+         _messages = [];
+      }
     }
     notifyListeners();
   }
@@ -89,10 +127,15 @@ class ChatService extends ChangeNotifier {
         }
 
         if (decoded is List) {
+          bool hasNewMessages = false;
           // Heartbeat messages usually go to DM
           for (var msgData in decoded) {
+            if (msgData is! Map) continue; // Safety check
+            
+            final textContent = msgData['text']?.toString() ?? " ... ";
+            
             final msg = Message(
-              text: msgData['text'],
+              text: textContent,
               isUser: false,
               timestamp: DateTime.now(), 
             );
@@ -102,21 +145,27 @@ class ChatService extends ChangeNotifier {
             // Only update UI if we are looking at DM
             if (_currentThread == "dm") {
               _messages.add(msg);
-              notifyListeners();
+              hasNewMessages = true;
             }
             
-            // Show Notification
-            const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-                'alex_msgs', 'Alex Messages',
-                importance: Importance.max, priority: Priority.high, showWhen: true);
-            const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
-            
-            flutterLocalNotificationsPlugin.show(
-                Random().nextInt(100000), 
-                'Alex', 
-                msg.text, 
-                platformChannelSpecifics
-            );
+            // Show Notification (Only on Mobile/Desktop, not Web to avoid errors or use conditional)
+            if (!kIsWeb) {
+               const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+                  'alex_msgs', 'Alex Messages',
+                  importance: Importance.max, priority: Priority.high, showWhen: true);
+               const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+               
+               flutterLocalNotificationsPlugin.show(
+                  Random().nextInt(100000), 
+                  'Alex', 
+                  msg.text, 
+                  platformChannelSpecifics
+               );
+            }
+          }
+          
+          if (hasNewMessages) {
+             notifyListeners();
           }
         }
       }
@@ -191,8 +240,11 @@ class ChatService extends ChangeNotifier {
 
     try {
       // 3. Prepare History
+      // Create a snapshot to avoid concurrent modification during loop
+      final messagesSnapshot = List<Message>.from(_messages);
+      
       int historyCount = 2000;
-      int start = (_messages.length - 1 - historyCount).clamp(0, _messages.length);
+      int start = (messagesSnapshot.length - 1 - historyCount).clamp(0, messagesSnapshot.length);
       
       List<Map<String, String>> history = [
         {
@@ -201,10 +253,11 @@ class ChatService extends ChangeNotifier {
         }
       ];
 
-      for (var i = start; i < _messages.length; i++) {
+      for (var i = start; i < messagesSnapshot.length; i++) {
+        final msgText = messagesSnapshot[i].text; // Hive might return null dynamically
         history.add({
-          "role": _messages[i].isUser ? "user" : "assistant",
-          "content": _messages[i].text
+          "role": messagesSnapshot[i].isUser ? "user" : "assistant",
+          "content": msgText.isEmpty ? "..." : msgText
         });
       }
 
@@ -254,7 +307,7 @@ class ChatService extends ChangeNotifier {
         } else if (data is Map) {
           // New Multi-Message Logic
           List<dynamic> responseMsgs = [];
-          if (data.containsKey('messages')) {
+          if (data['messages'] != null && data['messages'] is List) {
              responseMsgs = data['messages'];
           } else {
              // Fallback for old single response format
@@ -281,6 +334,10 @@ class ChatService extends ChangeNotifier {
             // 3. Add Message
             _isAiTyping = false;
             final aiText = msgData['text']?.toString() ?? "";
+            
+            // SKIP EMPTY MESSAGES to prevent UI bugs
+            if (aiText.trim().isEmpty) continue;
+
             final audioPath = msgData['audio_url']; 
             final isVoiceOnly = msgData['is_voice_only'] ?? false;
             
