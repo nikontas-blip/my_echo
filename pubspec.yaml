@@ -45,6 +45,7 @@ dependencies:
   audioplayers: ^6.5.1
   image_picker: ^1.2.1
   http_parser: ^4.1.2
+  flutter_local_notifications: ^19.5.0
 
 dev_dependencies:
   flutter_test:

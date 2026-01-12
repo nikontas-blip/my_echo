@@ -1,15 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'chat_screen.dart';
 import 'contacts_screen.dart';
 import 'chat_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize Chat Service (Hive, etc)
+  // Notification Setup
+  const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+  
+  final DarwinInitializationSettings initializationSettingsDarwin = DarwinInitializationSettings(
+    requestSoundPermission: true,
+    requestBadgePermission: true,
+    requestAlertPermission: true,
+  );
+  
+  final InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+    iOS: initializationSettingsDarwin,
+  );
+  
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  
+  // Initialize Chat Service
   final chatService = ChatService();
   await chatService.init();
 
@@ -40,7 +59,7 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const ContactsScreen(),
+      home: const ChatScreen(),
     );
   }
 }

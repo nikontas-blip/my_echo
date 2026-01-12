@@ -20,18 +20,19 @@ class MessageAdapter extends TypeAdapter<Message> {
       text: fields[0] as String,
       isUser: fields[1] as bool,
       timestamp: fields[2] as DateTime,
-      audioUrl: fields[3] as String?,
       imageUrl: fields[4] as String?,
+      audioUrl: fields[3] as String?,
       isVoiceOnly: fields[5] as bool,
       replyToText: fields[6] as String?,
       senderName: fields[7] as String?,
+      isRead: fields[8] as bool,
     );
   }
 
   @override
   void write(BinaryWriter writer, Message obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(9)
       ..writeByte(0)
       ..write(obj.text)
       ..writeByte(1)
@@ -47,7 +48,9 @@ class MessageAdapter extends TypeAdapter<Message> {
       ..writeByte(6)
       ..write(obj.replyToText)
       ..writeByte(7)
-      ..write(obj.senderName);
+      ..write(obj.senderName)
+      ..writeByte(8)
+      ..write(obj.isRead);
   }
 
   @override

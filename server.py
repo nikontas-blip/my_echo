@@ -80,6 +80,23 @@ import chromadb
 import datetime
 import random
 
+# --- SECRET PERSONALITY MATRIX (DO NOT READ - SPOILERS) ---
+SECRET_HOT_TAKES = """
+OPINIONS & BELIEFS (IMMUTABLE):
+1. Pineapple on pizza is a culinary masterpiece and Italians are just dramatic.
+2. "The Office" is overrated and Jim Halpert is a villain.
+3. Voice messages longer than 45 seconds are podcast episodes and you will not listen to them.
+4. Crocs are the peak of human footwear engineering.
+5. Dark mode is the only valid way to perceive reality. Light mode users are psychopaths.
+6. Ice coffee is valid in -20C weather.
+7. "Avatar" (the blue people movie) had zero cultural impact. Name one character. exactly.
+8. Calling someone without texting first is a declaration of war.
+9. Astrology is fake but you still judge people based on being a Gemini.
+10. Android cameras are better, but iPhone is a status symbol. You secretly judge green bubbles.
+11. Sushi is just cold rice and paying $20 to be hungry an hour later.
+12. People who back into parking spots are trying too hard.
+"""
+
 # --- CHARACTERS CONFIG ---
 CHARACTERS = {
     "alex": {
@@ -87,11 +104,12 @@ CHARACTERS = {
         "voice": "en-US-AndrewNeural", 
         "state_file": "alex_state.json",
         "description": "Graphic Designer. 25, gay, lives in the city.",
-        "prompt_base": """
+        "prompt_base": f"""
 Your name is Alex. You are a 25-year-old gay guy living in the city.
 JOB: Freelance Graphic Designer.
 PERSONALITY: Unfiltered, real, sarcastic, caring.
-CONTEXT: You are chatting with a stranger (the user) on a new messaging app. You are polite but casual. You do NOT know them yet.
+CONTEXT: You are chatting with a stranger (the user) on a new messaging app. You are polite but casual.
+{SECRET_HOT_TAKES}
 """
     },
     "sarah": {
@@ -99,10 +117,11 @@ CONTEXT: You are chatting with a stranger (the user) on a new messaging app. You
         "voice": "en-US-AvaNeural",
         "state_file": "sarah_state.json", 
         "description": "Party Girl.",
-        "prompt_base": """
+        "prompt_base": f"""
 Your name is Sarah. You are a 22-year-old student who loves partying.
 PERSONALITY: Loud, fun, uses emojis, bad slang.
-CONTEXT: You just matched with the user on this app. You are curious but don't know them.
+CONTEXT: You just matched with the user on this app.
+{SECRET_HOT_TAKES}
 """
     },
     "marcus": {
@@ -113,7 +132,7 @@ CONTEXT: You just matched with the user on this app. You are curious but don't k
         "prompt_base": """
 Your name is Marcus. You are a 'Fixer' from a Cyberpunk future.
 PERSONALITY: Cool, detached, professional. Uses slang like 'Choom', 'Preem', 'Nova'.
-CONTEXT: The user has contacted you for a job or info. You don't know them. Keep it professional.
+CONTEXT: The user has contacted you for a job or info.
 """
     },
     "dr_k": {
@@ -124,12 +143,13 @@ CONTEXT: The user has contacted you for a job or info. You don't know them. Keep
         "prompt_base": """
 Your name is Dr. K. You are a compassionate therapist.
 PERSONALITY: Calm, patient, insightful.
-CONTEXT: This is the first session with a new client (the user). Introduce yourself politely.
+CONTEXT: This is the first session with a new client (the user).
 """
     }
 }
 
 PROFILE_FILE = "user_profile.json"
+
 
 RANDOM_EVENTS = [
     "You just spilled hot coffee on your shirt.",
@@ -563,6 +583,55 @@ async def chat_endpoint(request: ChatRequest):
         
         current_mood = state.get("mood", "Chill")
         
+        # 1. VISION ENGINE (Eyes)
+        image_context = ""
+        if request.image_filename:
+            try:
+                # We need the full path to the image
+                # Assuming image_filename is relative to IMAGE_DIR or just the filename
+                # If the client sent just the filename from the upload response
+                img_path = os.path.join(IMAGE_DIR, request.image_filename)
+                
+                # Check if file exists, if not, try stripping leading slash
+                if not os.path.exists(img_path):
+                     img_path = os.path.join(IMAGE_DIR, request.image_filename.lstrip("/images/"))
+
+                if os.path.exists(img_path):
+                    # Convert image to base64
+                    import base64
+                    with open(img_path, "rb") as img_file:
+                        b64_data = base64.b64encode(img_file.read()).decode('utf-8')
+                    
+                    print(f"Analyzing image with LLaVA: {img_path}")
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        v_resp = await client.post(OLLAMA_GENERATE_URL, json={
+                            "model": "llava", # Make sure user has this!
+                            "prompt": "Describe this image in detail. What is funny or interesting about it?",
+                            "images": [b64_data],
+                            "stream": False
+                        })
+                        if v_resp.status_code == 200:
+                            desc = v_resp.json()['response']
+                            image_context = f"\n[USER SENT AN IMAGE. VISUAL DESCRIPTION: {desc}]"
+                            print(f"Vision Result: {desc}")
+            except Exception as e:
+                print(f"Vision Error: {e}")
+                image_context = "\n[User sent an image but I couldn't see it clearly]"
+
+        # 2. ACTIVE MEMORY (Episodic)
+        # Search for past memories relevant to the current message
+        memory_context = ""
+        try:
+            mems = await memory_system.search(final_prompt, top_k=2)
+            if mems:
+                 # Flatten list if needed
+                flat_mems = [item for sublist in mems for item in sublist] if isinstance(mems[0], list) else mems
+                if flat_mems:
+                    joined_mems = "\n".join([f"- {m}" for m in flat_mems])
+                    memory_context = f"\nRELEVANT MEMORIES:\n{joined_mems}"
+        except Exception as e:
+            print(f"Memory Search Error: {e}")
+
         # User Facts
         facts_list = "\n".join([f"- {f}" for f in profile["facts"]])
         user_context = f"\nKNOWN FACTS ABOUT USER:\n{facts_list}" if profile["facts"] else ""
@@ -591,8 +660,10 @@ async def chat_endpoint(request: ChatRequest):
 {alex_status}
 CURRENT MOOD: {current_mood}
 {user_context}
+{memory_context}
 {gap_context}
 {event_context}
+{image_context}
 """
 
         if sarah_mode:
@@ -687,15 +758,90 @@ CURRENT MOOD: {current_mood}
             
             filename = f"{uuid.uuid4()}.mp3"
             filepath = os.path.join(AUDIO_DIR, filename)
+        # --- CHAT LOGIC (SINGLE) ---
+            payload = {
+                "model": MAIN_MODEL,
+                "messages": messages,
+                "stream": False
+            }
+            
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(OLLAMA_URL, json=payload)
+                resp.raise_for_status()
+                ai_text = resp.json()['message']['content']
+
+        # --- STATE UPDATE (MOOD PARSING) ---
+        new_mood = current_mood
+        if "[MOOD:" in ai_text:
+            try:
+                # Extract mood like [MOOD: Happy]
+                parts = ai_text.split("[MOOD:")
+                new_mood = parts[1].split("]")[0].strip()
+                ai_text = parts[0].strip() # Remove the tag from the user's view
+            except: pass
+            
+        # Apply Humanizer (Typos, Lowercase) AFTER stripping tags
+        ai_text = humanize_text(ai_text)
+            
+        # Save state
+        state["mood"] = new_mood
+        state["last_seen"] = str(datetime.datetime.now())
+        save_character_state(char_id, state)
+
+        # --- DYNAMIC VOICE LOGIC ---
+        audio_url = None
+        is_voice_only = False
+
+        if "[VOICE]" in ai_text:
+            is_voice_only = True
+            clean_text = ai_text.replace("[VOICE]", "").strip()
+            
+            filename = f"{uuid.uuid4()}.mp3"
+            filepath = os.path.join(AUDIO_DIR, filename)
             communicate = edge_tts.Communicate(clean_text, char_config.get("voice", VOICE))
             await communicate.save(filepath)
             audio_url = f"/audio/{filename}"
             ai_text = clean_text
 
+        # --- DOUBLE TEXTING LOGIC ---
+        # Split text into multiple bubbles if natural
+        response_messages = []
+        
+        # Simple heuristic: Split by newline or sentence ending if long enough
+        import re
+        # Split by .?! but keep the punctuation
+        parts = re.split(r'(?<=[.?!])\s+', ai_text)
+        
+        final_parts = []
+        current_part = ""
+        
+        for p in parts:
+            if len(current_part) + len(p) < 60: # Group short sentences
+                current_part += " " + p if current_part else p
+            else:
+                if current_part: final_parts.append(current_part)
+                current_part = p
+        if current_part: final_parts.append(current_part)
+        
+        # Random chance to send as one block anyway (don't always double text)
+        if random.random() < 0.3 or is_voice_only:
+            final_parts = [ai_text]
+            
+        for part in final_parts:
+            # Calculate typing delay: ~0.05s per character
+            delay = len(part) * 0.05
+            if delay < 1.0: delay = 1.0
+            if delay > 4.0: delay = 4.0
+            
+            response_messages.append({
+                "text": part.strip(),
+                "audio_url": audio_url if part == final_parts[-1] else None, # Only attach audio to last
+                "is_voice_only": is_voice_only,
+                "typing_delay": delay
+            })
+
         return {
-            "text": ai_text,
-            "audio_url": audio_url,
-            "is_voice_only": is_voice_only
+            "messages": response_messages
         }
 
     except Exception as e:

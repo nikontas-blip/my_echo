@@ -5,8 +5,10 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:http_parser/http_parser.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'message_model.dart';
 import 'package:image_picker/image_picker.dart';
+import 'main.dart'; // To access flutterLocalNotificationsPlugin
 
 class ChatService extends ChangeNotifier {
   static const String _baseUrl = 'http://192.168.1.168:8000';
@@ -17,8 +19,10 @@ class ChatService extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
   
+  bool _isAiTyping = false;
+  bool get isAiTyping => _isAiTyping;
+  
   String _currentThread = "dm"; // "dm" or "group"
-  String get currentThread => _currentThread;
   
   String _characterId = "alex";
   String get characterId => _characterId;
@@ -99,6 +103,19 @@ class ChatService extends ChangeNotifier {
               _messages.add(msg);
               notifyListeners();
             }
+            
+            // Show Notification
+            const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+                'alex_msgs', 'Alex Messages',
+                importance: Importance.max, priority: Priority.high, showWhen: true);
+            const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+            
+            flutterLocalNotificationsPlugin.show(
+                Random().nextInt(100000), 
+                'Alex', 
+                msg.text, 
+                platformChannelSpecifics
+            );
           }
         }
       }
@@ -161,6 +178,15 @@ class ChatService extends ChangeNotifier {
     
     _isLoading = true;
     notifyListeners();
+
+    // Simulate "Read" status after 1-2 seconds
+    Future.delayed(Duration(milliseconds: 1000 + Random().nextInt(1000)), () {
+        if (_messages.contains(userMsg)) {
+            userMsg.isRead = true;
+            userMsg.save(); // Update in Hive
+            notifyListeners();
+        }
+    });
 
     try {
       // 3. Prepare History
@@ -225,41 +251,77 @@ class ChatService extends ChangeNotifier {
              activeBox?.add(msg);
           }
         } else if (data is Map) {
-          // Standard Single Response
-          final aiText = data['text']?.toString() ?? ""; // Prevent NULL crash
-          final audioPath = data['audio_url']; 
-          final isVoiceOnly = data['is_voice_only'] ?? false;
-          
-          String? fullAudioUrl;
-          if (audioPath != null) {
-             fullAudioUrl = '$_baseUrl$audioPath';
+          // New Multi-Message Logic
+          List<dynamic> responseMsgs = [];
+          if (data.containsKey('messages')) {
+             responseMsgs = data['messages'];
+          } else {
+             // Fallback for old single response format
+             responseMsgs.add({
+               "text": data['text'], 
+               "audio_url": data['audio_url'],
+               "is_voice_only": data['is_voice_only'] ?? false,
+               "typing_delay": 2.0
+             });
           }
-  
-          // Logic: Sometimes reply to the specific message
-          String? replyContext;
-          if (Random().nextDouble() < 0.4 && text.isNotEmpty) {
-            replyContext = text.length > 50 ? "${text.substring(0, 50)}..." : text;
-          }
-  
-          final aiMsg = Message(
-            text: aiText, 
-            isUser: false, 
-            timestamp: DateTime.now(),
-            audioUrl: fullAudioUrl,
-            isVoiceOnly: isVoiceOnly,
-            replyToText: replyContext
-          );
           
-          _messages.add(aiMsg);
-          activeBox?.add(aiMsg);
+          _isLoading = false; // Initial load done, now we stream bubbles
+          notifyListeners();
+          
+          for (var msgData in responseMsgs) {
+            // 1. Show Typing Indicator
+            _isAiTyping = true;
+            notifyListeners();
+            
+            // 2. Wait for calculated delay
+            double delay = (msgData['typing_delay'] ?? 2.0).toDouble();
+            await Future.delayed(Duration(milliseconds: (delay * 1000).toInt()));
+            
+            // 3. Add Message
+            _isAiTyping = false;
+            final aiText = msgData['text']?.toString() ?? "";
+            final audioPath = msgData['audio_url']; 
+            final isVoiceOnly = msgData['is_voice_only'] ?? false;
+            
+            String? fullAudioUrl;
+            if (audioPath != null) {
+               fullAudioUrl = '$_baseUrl$audioPath';
+            }
+    
+            // Logic: Sometimes reply to the specific message (only for first bubble maybe?)
+            String? replyContext;
+            if (Random().nextDouble() < 0.2 && text.isNotEmpty && responseMsgs.indexOf(msgData) == 0) {
+              replyContext = text.length > 50 ? "${text.substring(0, 50)}..." : text;
+            }
+    
+            final aiMsg = Message(
+              text: aiText, 
+              isUser: false, 
+              timestamp: DateTime.now(),
+              audioUrl: fullAudioUrl,
+              isVoiceOnly: isVoiceOnly,
+              replyToText: replyContext,
+              isRead: true // User sees it immediately
+            );
+            
+            _messages.add(aiMsg);
+            activeBox?.add(aiMsg);
+            notifyListeners();
+            
+            // Small pause between bubbles
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
         }
       } else {
         _addError("Server Error: ${response.statusCode}");
+        _isLoading = false;
       }
     } catch (e) {
        _addError("Connection Failed: $e");
+       _isLoading = false;
     } finally {
       _isLoading = false;
+      _isAiTyping = false;
       notifyListeners();
     }
   }

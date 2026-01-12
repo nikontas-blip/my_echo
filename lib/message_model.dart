@@ -24,18 +24,22 @@ class Message extends HiveObject {
 
   @HiveField(6)
   final String? replyToText;
-
+  
   @HiveField(7)
-  final String? senderName;
+  final String? senderName; // For group chats
+  
+  @HiveField(8)
+  bool isRead;
 
   Message({
-    required this.text, 
-    required this.isUser, 
-    required this.timestamp, 
-    this.audioUrl, 
-    this.imageUrl, 
+    required this.text,
+    required this.isUser,
+    required this.timestamp,
+    this.imageUrl,
+    this.audioUrl,
     this.isVoiceOnly = false,
     this.replyToText,
-    this.senderName
+    this.senderName,
+    this.isRead = false,
   });
 }

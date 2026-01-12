@@ -218,10 +218,7 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: false, // Hide back button
         title: Row(
           children: [
             GestureDetector(
@@ -252,7 +249,7 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(charName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
-                Text(chatService.currentThread == "group" ? 'Alex, Sarah' : 'Active now', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                Text('Active now', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
               ],
             ),
           ],
@@ -301,9 +298,9 @@ class _ChatScreenState extends State<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              itemCount: chatService.messages.length + (chatService.isLoading ? 1 : 0),
+              itemCount: chatService.messages.length + (chatService.isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
-                if (chatService.isLoading && index == chatService.messages.length) {
+                if (chatService.isAiTyping && index == chatService.messages.length) {
                   return TypingBubble(avatarSeed: charAvatarSeed);
                 }
                 final msg = chatService.messages[index];
@@ -461,6 +458,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                   ),
                 ),
+                if (isUser)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, right: 4),
+                    child: Text(
+                      msg.isRead ? "Read" : "Sent",
+                      style: TextStyle(color: Colors.grey[600], fontSize: 10, fontWeight: FontWeight.bold),
+                    ),
+                  ),
               ],
             ),
           ),
