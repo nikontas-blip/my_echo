@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:http_parser/http_parser.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart' hide Message;
 import 'message_model.dart';
 import 'package:image_picker/image_picker.dart';
 import 'main.dart'; // To access flutterLocalNotificationsPlugin
@@ -23,6 +23,7 @@ class ChatService extends ChangeNotifier {
   bool get isAiTyping => _isAiTyping;
   
   String _currentThread = "dm"; // "dm" or "group"
+  String get currentThread => _currentThread;
   
   String _characterId = "alex";
   String get characterId => _characterId;

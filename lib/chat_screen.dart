@@ -225,10 +225,10 @@ class _ChatScreenState extends State<ChatScreen> {
               onTap: _showStory,
               child: Container(
                 padding: const EdgeInsets.all(2), // Border width
-                decoration: _hasStory ? const BoxDecoration(
+                decoration: _hasStory ? BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
-                    colors: [Color(0xFF833ab4), Color(0xFFfd1d1d), Color(0xFFfcb045)],
+                    colors: [storyColor1, storyColor1.withOpacity(0.7), Colors.white],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight
                   )
