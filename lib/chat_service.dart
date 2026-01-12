@@ -19,6 +19,9 @@ class ChatService extends ChangeNotifier {
   
   String _currentThread = "dm"; // "dm" or "group"
   String get currentThread => _currentThread;
+  
+  String _characterId = "alex";
+  String get characterId => _characterId;
 
   Box<Message>? _boxDm;
   Box<Message>? _boxGroup;
@@ -35,6 +38,11 @@ class ChatService extends ChangeNotifier {
     
     // Start Polling for Heartbeat Messages
     _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) => _pollServer());
+  }
+  
+  void setCharacter(String id) {
+    _characterId = id;
+    notifyListeners();
   }
   
   void switchThread(String threadId) {
@@ -177,7 +185,8 @@ class ChatService extends ChangeNotifier {
       final body = {
         "message": text,
         "history": history,
-        "thread_id": _currentThread 
+        "thread_id": _currentThread,
+        "character_id": _characterId
       };
       
       if (serverImageFilename != null) {

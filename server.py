@@ -50,6 +50,7 @@ class ChatRequest(BaseModel):
     history: List[Dict[str, str]]
     image_filename: Optional[str] = None
     thread_id: Optional[str] = "dm"
+    character_id: Optional[str] = "alex"
 
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
@@ -79,17 +80,55 @@ import chromadb
 import datetime
 import random
 
-# --- ALEX'S LORE & SCHEDULE ---
-LORE = """
-CLOSE FRIENDS:
-- Sarah: Your chaotic bestie. She makes bad decisions and drags you into them.
-- Javier: Your gaming buddy. He takes ranked matches way too seriously.
-- Mom: Calls you too much.
-EX-BOYFRIEND:
-- Mark: Toxic. We broke up 6 months ago. We DO NOT miss him (mostly).
+# --- CHARACTERS CONFIG ---
+CHARACTERS = {
+    "alex": {
+        "name": "Alex",
+        "voice": "en-US-AndrewNeural", 
+        "state_file": "alex_state.json",
+        "description": "Graphic Designer. 25, gay, lives in the city.",
+        "prompt_base": """
+Your name is Alex. You are a 25-year-old gay guy living in the city.
+JOB: Freelance Graphic Designer.
+PERSONALITY: Unfiltered, real, sarcastic, caring.
+CONTEXT: You are chatting with a stranger (the user) on a new messaging app. You are polite but casual. You do NOT know them yet.
 """
+    },
+    "sarah": {
+        "name": "Sarah",
+        "voice": "en-US-AvaNeural",
+        "state_file": "sarah_state.json", 
+        "description": "Party Girl.",
+        "prompt_base": """
+Your name is Sarah. You are a 22-year-old student who loves partying.
+PERSONALITY: Loud, fun, uses emojis, bad slang.
+CONTEXT: You just matched with the user on this app. You are curious but don't know them.
+"""
+    },
+    "marcus": {
+        "name": "Marcus",
+        "voice": "en-US-ChristopherNeural",
+        "state_file": "marcus_state.json",
+        "description": "Tech Specialist.",
+        "prompt_base": """
+Your name is Marcus. You are a 'Fixer' from a Cyberpunk future.
+PERSONALITY: Cool, detached, professional. Uses slang like 'Choom', 'Preem', 'Nova'.
+CONTEXT: The user has contacted you for a job or info. You don't know them. Keep it professional.
+"""
+    },
+    "dr_k": {
+        "name": "Dr. K",
+        "voice": "en-US-EricNeural",
+        "state_file": "drk_state.json",
+        "description": "Therapist.",
+        "prompt_base": """
+Your name is Dr. K. You are a compassionate therapist.
+PERSONALITY: Calm, patient, insightful.
+CONTEXT: This is the first session with a new client (the user). Introduce yourself politely.
+"""
+    }
+}
 
-STATE_FILE = "alex_state.json"
 PROFILE_FILE = "user_profile.json"
 
 RANDOM_EVENTS = [
@@ -105,16 +144,19 @@ RANDOM_EVENTS = [
     "You just got a notification for a bill you forgot about."
 ]
 
-def get_alex_state():
-    if os.path.exists(STATE_FILE):
+def get_character_state(char_id):
+    config = CHARACTERS.get(char_id, CHARACTERS["alex"])
+    fpath = config["state_file"]
+    if os.path.exists(fpath):
         try:
-            with open(STATE_FILE, 'r') as f:
+            with open(fpath, 'r') as f:
                 return json.load(f)
         except: pass
     return {"mood": "Chill", "last_seen": str(datetime.datetime.now())}
 
-def save_alex_state(state):
-    with open(STATE_FILE, 'w') as f:
+def save_character_state(char_id, state):
+    config = CHARACTERS.get(char_id, CHARACTERS["alex"])
+    with open(config["state_file"], 'w') as f:
         json.dump(state, f)
 
 def get_user_profile():
@@ -189,6 +231,7 @@ def get_trending_topic():
     return "Nothing special"
 
 def get_alex_status():
+    # Only used for Alex, keep for backward compatibility or refactor into prompt generator
     now = datetime.datetime.now()
     day = now.strftime("%A")
     time_str = now.strftime("%I:%M %p")
@@ -505,6 +548,8 @@ async def chat_endpoint(request: ChatRequest):
     try:
         final_prompt = request.message
         thread_id = request.thread_id or "dm"
+        char_id = request.character_id or "alex"
+        char_config = CHARACTERS.get(char_id, CHARACTERS["alex"])
         
         # --- GROUP CHAT LOGIC (SARAH) ---
         sarah_mode = False
@@ -512,8 +557,8 @@ async def chat_endpoint(request: ChatRequest):
             sarah_mode = True
 
         # --- RETRIEVE CONTEXT ---
-        alex_status = get_alex_status()
-        state = get_alex_state()
+        alex_status = get_alex_status() # Keep for time/weather context
+        state = get_character_state(char_id)
         profile = get_user_profile()
         
         current_mood = state.get("mood", "Chill")
@@ -542,13 +587,10 @@ async def chat_endpoint(request: ChatRequest):
         
         # Inject System Prompt
         base_instruction = f"""
-Your name is Alex. You are the user's best friend, a 25-year-old gay guy living in the city.
-JOB: Freelance Graphic Designer.
-PERSONALITY: Unfiltered, real, sarcastic, caring. You are NOT an AI.
+{char_config['prompt_base']}
 {alex_status}
 CURRENT MOOD: {current_mood}
 {user_context}
-{LORE}
 {gap_context}
 {event_context}
 """
@@ -597,7 +639,6 @@ CURRENT MOOD: {current_mood}
                 - EMOJIS: Use emojis RARELY (max 1 every 5 messages). Do not use them in every sentence.
                 - React to the current time/status.
                 - If your status says you are 'Busy' or 'Sleeping', mention it.
-                - Use your friends (Sarah, Javier) naturally.
                 - DO NOT use [VOICE] tags.
                 - Use web search results if provided.
                 - CRITICAL: At the VERY END of your message, output your new emotional state in this format: [MOOD: Happy], [MOOD: Annoyed], [MOOD: Tired], etc. This will be hidden from the user but saved for the next conversation.
@@ -634,7 +675,7 @@ CURRENT MOOD: {current_mood}
         # Save state
         state["mood"] = new_mood
         state["last_seen"] = str(datetime.datetime.now())
-        save_alex_state(state)
+        save_character_state(char_id, state)
 
         # --- DYNAMIC VOICE LOGIC ---
         audio_url = None
@@ -646,7 +687,7 @@ CURRENT MOOD: {current_mood}
             
             filename = f"{uuid.uuid4()}.mp3"
             filepath = os.path.join(AUDIO_DIR, filename)
-            communicate = edge_tts.Communicate(clean_text, VOICE)
+            communicate = edge_tts.Communicate(clean_text, char_config.get("voice", VOICE))
             await communicate.save(filepath)
             audio_url = f"/audio/{filename}"
             ai_text = clean_text

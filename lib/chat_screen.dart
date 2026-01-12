@@ -182,12 +182,46 @@ class _ChatScreenState extends State<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
 
+    // Determine current character details
+    String charName = "Alex";
+    String charAvatarSeed = "Alex";
+    Color storyColor1 = const Color(0xFF833ab4);
+    
+    if (chatService.currentThread == "group") {
+      charName = "The Gang";
+      charAvatarSeed = "Gang";
+    } else {
+      switch (chatService.characterId) {
+        case "sarah":
+          charName = "Sarah";
+          charAvatarSeed = "Sarah";
+          storyColor1 = Colors.pinkAccent;
+          break;
+        case "marcus":
+          charName = "Marcus";
+          charAvatarSeed = "Marcus"; 
+          storyColor1 = Colors.cyan;
+          break;
+        case "dr_k":
+          charName = "Dr. K";
+          charAvatarSeed = "DrK";
+          storyColor1 = Colors.green;
+          break;
+        default:
+          charName = "Alex";
+          charAvatarSeed = "Alex";
+      }
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         elevation: 0,
-        leading: const Icon(Icons.arrow_back, color: Colors.white),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: Row(
           children: [
             GestureDetector(
@@ -205,10 +239,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(2), // Gap between border and image
                   decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black),
-                  child: const CircleAvatar(
+                  child: CircleAvatar(
                     radius: 16,
-                    backgroundImage: NetworkImage('https://api.dicebear.com/7.x/notionists/png?seed=Alex&backgroundColor=transparent'), 
-                    backgroundColor: Color(0xFF262626),
+                    backgroundImage: NetworkImage('https://api.dicebear.com/7.x/notionists/png?seed=$charAvatarSeed&backgroundColor=transparent'), 
+                    backgroundColor: const Color(0xFF262626),
                   ),
                 ),
               ),
@@ -217,8 +251,8 @@ class _ChatScreenState extends State<ChatScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Alex', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
-                Text('Active now', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                Text(charName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
+                Text(chatService.currentThread == "group" ? 'Alex, Sarah' : 'Active now', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
               ],
             ),
           ],
@@ -233,9 +267,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 context: context,
                 builder: (ctx) => AlertDialog(
                   backgroundColor: const Color(0xFF262626),
-                  title: const Text("Reset Alex?", style: TextStyle(color: Colors.white)),
+                  title: Text("Reset $charName?", style: const TextStyle(color: Colors.white)),
                   content: const Text(
-                    "This will wipe all chat history AND his long-term memory of you. He will forget everything.",
+                    "This will wipe chat history. Memory reset is global for now.",
                     style: TextStyle(color: Colors.grey)
                   ),
                   actions: [
@@ -249,7 +283,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         chatService.clearHistory();
                         Navigator.of(ctx).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Memory wiped."))
+                          const SnackBar(content: Text("Chat cleared."))
                         );
                       },
                     ),
@@ -270,10 +304,10 @@ class _ChatScreenState extends State<ChatScreen> {
               itemCount: chatService.messages.length + (chatService.isLoading ? 1 : 0),
               itemBuilder: (context, index) {
                 if (chatService.isLoading && index == chatService.messages.length) {
-                  return const TypingBubble();
+                  return TypingBubble(avatarSeed: charAvatarSeed);
                 }
                 final msg = chatService.messages[index];
-                return _buildMessageBubble(msg);
+                return _buildMessageBubble(msg, defaultAvatarSeed: charAvatarSeed, defaultName: charName);
               },
             ),
           ),
@@ -283,19 +317,20 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageBubble(Message msg) {
+  Widget _buildMessageBubble(Message msg, {String defaultAvatarSeed = "Alex", String defaultName = "Alex"}) {
     final isUser = msg.isUser;
     final hasAudio = msg.audioUrl != null;
     final hasImage = msg.imageUrl != null;
     final isPlaying = _playingUrl == msg.audioUrl;
     
     // Determine Sender Identity
-    String avatarUrl = 'https://api.dicebear.com/7.x/notionists/png?seed=Alex&backgroundColor=transparent';
-    String displayName = "Alex";
+    String avatarUrl = 'https://api.dicebear.com/7.x/notionists/png?seed=$defaultAvatarSeed&backgroundColor=transparent';
+    String displayName = defaultName;
     
-    if (msg.senderName == "Sarah") {
-      avatarUrl = 'https://api.dicebear.com/7.x/notionists/png?seed=Sarah&backgroundColor=ffdfbf';
-      displayName = "Sarah";
+    if (msg.senderName != null) {
+       // Override for Group Chat
+       displayName = msg.senderName!;
+       avatarUrl = 'https://api.dicebear.com/7.x/notionists/png?seed=$displayName&backgroundColor=ffdfbf';
     }
 
     return Padding(
@@ -537,7 +572,8 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 class TypingBubble extends StatelessWidget {
-  const TypingBubble({super.key});
+  final String avatarSeed;
+  const TypingBubble({super.key, this.avatarSeed = "Alex"});
 
   @override
   Widget build(BuildContext context) {
@@ -546,10 +582,10 @@ class TypingBubble extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          const CircleAvatar(
+          CircleAvatar(
             radius: 14,
-            backgroundImage: NetworkImage('https://api.dicebear.com/7.x/notionists/png?seed=Alex&backgroundColor=transparent'), 
-            backgroundColor: Color(0xFF262626),
+            backgroundImage: NetworkImage('https://api.dicebear.com/7.x/notionists/png?seed=$avatarSeed&backgroundColor=transparent'), 
+            backgroundColor: const Color(0xFF262626),
           ),
           const SizedBox(width: 8),
           Container(
